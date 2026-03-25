@@ -473,18 +473,22 @@ def predict_ball_probability(lstm_model, scaler, X_seq, models_dict=None, use_mo
     lstm_prob = None
     if lstm_model is not None:
         lstm_prob = lstm_model.predict(last_sequence, verbose=0)[0]  # sigmoid 输出
+        # 确保是一维数组
+        lstm_prob = np.asarray(lstm_prob).flatten()
 
     model_probs = []
     if models_dict:
         for name, pred_func in models_dict.items():
             if use_models is None or name in use_models:
                 prob = pred_func(last_flat)
+                prob = np.asarray(prob).flatten()
                 model_probs.append(prob)
 
     if stacker is not None and base_models_list:
         X_meta = []
         for name, model in base_models_list:
             pred = model.predict(last_flat)[0]
+            pred = np.asarray(pred).flatten()
             X_meta.append(pred)
         X_meta = np.concatenate(X_meta).reshape(1, -1)
         stack_prob = stacker.predict(X_meta)[0]
@@ -601,6 +605,7 @@ def auto_tune_rf(X_train_flat, y_train, X_val_flat, y_val, param_grid, progress_
 
 # ==================== 历史回测相关 ====================
 def predict_reds_from_prob(prob, n=6):
+    prob = np.asarray(prob).flatten()
     top_indices = np.argsort(prob)[-n:][::-1]
     return sorted(top_indices + 1)
 
@@ -612,6 +617,14 @@ def generate_pdf_report(ball_prob, blue_prob, recommended_notes, history_df, fil
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
+
+    # 确保 ball_prob 是一维数组
+    ball_prob = np.asarray(ball_prob).flatten()
+    if len(ball_prob) != 33:
+        if len(ball_prob) > 33:
+            ball_prob = ball_prob[:33]
+        else:
+            ball_prob = np.pad(ball_prob, (0, 33 - len(ball_prob)), 'constant')
 
     c = canvas.Canvas(filename, pagesize=A4)
     width, height = A4
@@ -662,6 +675,12 @@ def generate_pdf_report(ball_prob, blue_prob, recommended_notes, history_df, fil
     return filename
 
 def generate_html_report(ball_prob, blue_prob, recommended_notes, history_df):
+    ball_prob = np.asarray(ball_prob).flatten()
+    if len(ball_prob) != 33:
+        if len(ball_prob) > 33:
+            ball_prob = ball_prob[:33]
+        else:
+            ball_prob = np.pad(ball_prob, (0, 33 - len(ball_prob)), 'constant')
     html = f"""
     <html>
     <head><title>AI双色球分析报告</title></head>
@@ -938,9 +957,16 @@ def plot_blue_trend(df):
     return fig
 
 # --------------------------
-# 可视化模块
+# 可视化模块（修复数组形状）
 # --------------------------
 def plot_heatmap(ball_prob):
+    # 确保 ball_prob 是一维数组且长度为33
+    ball_prob = np.asarray(ball_prob).flatten()
+    if len(ball_prob) != 33:
+        if len(ball_prob) > 33:
+            ball_prob = ball_prob[:33]
+        else:
+            ball_prob = np.pad(ball_prob, (0, 33 - len(ball_prob)), 'constant')
     prob_matrix = np.zeros((6, 6))
     for i in range(33):
         row = i // 6
@@ -1000,6 +1026,12 @@ def plot_feature_importance(models_dict, feature_names):
 
 # ==================== 3D散点图 ====================
 def plot_3d_prob(ball_prob):
+    ball_prob = np.asarray(ball_prob).flatten()
+    if len(ball_prob) != 33:
+        if len(ball_prob) > 33:
+            ball_prob = ball_prob[:33]
+        else:
+            ball_prob = np.pad(ball_prob, (0, 33 - len(ball_prob)), 'constant')
     nums = np.arange(1,34)
     odd_even = (nums % 2)
     section = (nums - 1) // 11
@@ -1527,7 +1559,7 @@ def main():
                 X_seq = np.array(X_seq)
                 last_sequence = X_seq[-1].reshape(1, X_seq.shape[1], X_seq.shape[2])
                 lstm_prob = pretrained_model.predict(last_sequence, verbose=0)[0]
-                ball_prob = lstm_prob
+                ball_prob = np.asarray(lstm_prob).flatten()
                 st.session_state['scaler'] = scaler
                 st.session_state['look_back'] = look_back
                 st.session_state['lstm_model'] = pretrained_model
