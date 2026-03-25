@@ -682,17 +682,25 @@ def generate_html_report(ball_prob, blue_prob, recommended_notes, history_df):
     return html
 
 # --------------------------
-# 蒙特卡洛生成
+# 蒙特卡洛生成（修复版）
 # --------------------------
 def monte_carlo_generate(ball_prob, n=MONTE_CARLO_COUNT):
+    """蒙特卡洛模拟生成组合，ball_prob 为红球概率向量"""
     combinations = []
-    prob_norm = ball_prob / (np.sum(ball_prob) + 1e-10)
+    # 确保概率非负且归一化
+    prob = np.maximum(ball_prob, 0)  # 将负值截断为0
+    total = np.sum(prob)
+    if total <= 0:
+        # 如果所有概率为0，则使用均匀分布
+        prob = np.ones(33) / 33
+    else:
+        prob = prob / total
     for _ in range(n):
         red_balls = np.random.choice(
             range(RED_MIN, RED_MAX+1),
             size=6,
             replace=False,
-            p=prob_norm
+            p=prob
         )
         blue_ball = random.randint(BLUE_MIN, BLUE_MAX)
         red_balls = sorted(red_balls)
