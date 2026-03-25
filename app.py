@@ -265,7 +265,43 @@ def train_blue_model(df):
     prob = counts / len(blue_series)
     return prob
 
-# ==================== 进度回调（增强版：显示 accuracy）====================
+def predict_blue_frequency(history_df, method='frequency'):
+    """基于历史频率返回最可能的蓝球"""
+    counts = history_df['blue'].value_counts()
+    if method == 'frequency':
+        return counts.idxmax()
+    elif method == 'hot':
+        recent = history_df.tail(50)['blue'].value_counts()
+        return recent.idxmax() if not recent.empty else 1
+    elif method == 'cold':
+        recent = history_df.tail(50)['blue'].value_counts()
+        all_nums = set(range(1,17))
+        appeared = set(recent.index)
+        cold = list(all_nums - appeared)
+        if cold:
+            return random.choice(cold)
+        else:
+            return 1
+    else:
+        return random.randint(1,16)
+
+def backtest_blue_accuracy(history_df, method='frequency', n_periods=100):
+    """回测蓝球预测准确率"""
+    if len(history_df) < n_periods + 1:
+        n_periods = len(history_df) - 1
+    if n_periods <= 0:
+        return 0.0
+    test_df = history_df.tail(n_periods + 1).reset_index(drop=True)
+    correct = 0
+    for i in range(1, len(test_df)):
+        train = test_df.iloc[:i]
+        pred = predict_blue_frequency(train, method)
+        actual = test_df.iloc[i]['blue']
+        if pred == actual:
+            correct += 1
+    return correct / n_periods
+
+# ==================== 进度回调 ====================
 class StreamlitProgressCallback(Callback):
     def __init__(self, progress_bar, status_text, epochs):
         super().__init__()
@@ -281,19 +317,17 @@ class StreamlitProgressCallback(Callback):
             f"Epoch {epoch+1}/{self.epochs} - loss: {logs['loss']:.4f} - acc: {acc:.4f} - val_loss: {logs['val_loss']:.4f} - val_acc: {val_acc:.4f}"
         )
 
-# ==================== 多模型训练（多标签）====================
+# ==================== 多模型训练 ====================
 def train_models(data, look_back=10, enhanced=False, use_xgboost=False, use_rf=False, use_lgb=False,
                  lstm_units=128, num_layers=2, dropout=0.2, lstm_weight=1.0,
                  xgb_ensemble_size=1, xgb_params=None, use_stacking=False,
                  learning_rate=0.0005, epochs=300, patience=80, use_l2=False,
                  progress_bar=None, status_text=None):
-    # 检查标签是否为二值0/1
     y_check = data[:10, :33]
     st.write(f"标签检查: min={y_check.min():.4f}, max={y_check.max():.4f}, mean={y_check.mean():.4f}")
     if y_check.min() < 0 or y_check.max() > 1:
         st.error("错误：标签不是0/1！请检查数据预处理。")
         return None, None, None, None, None, None
-    # 如果值不是严格0/1，但接近，可以强制二值化
     if y_check.min() >= 0 and y_check.max() <= 1 and not np.all(np.isin(y_check, [0,1])):
         st.warning("标签有小数，将强制二值化（>0.5为1）")
         data[:, :33] = (data[:, :33] > 0.5).astype(np.float32)
@@ -304,7 +338,7 @@ def train_models(data, look_back=10, enhanced=False, use_xgboost=False, use_rf=F
     X_seq, y = [], []
     for i in range(look_back, len(data_scaled)):
         X_seq.append(data_scaled[i-look_back:i, :])
-        y.append(data[i, :33])  # 目标取原始 one‑hot (0/1)
+        y.append(data[i, :33])
     X_seq = np.array(X_seq)
     y = np.array(y)
 
@@ -436,7 +470,7 @@ def predict_ball_probability(lstm_model, scaler, X_seq, models_dict=None, use_mo
 
     lstm_prob = None
     if lstm_model is not None:
-        lstm_prob = lstm_model.predict(last_sequence, verbose=0)[0]  # sigmoid 输出
+        lstm_prob = lstm_model.predict(last_sequence, verbose=0)[0]
 
     model_probs = []
     if models_dict:
@@ -1028,8 +1062,7 @@ def main():
         initial_sidebar_state="expanded"
     )
 
-    # ========== 用户登录验证（可选，若不需要可删除此段）==========
-    # 如需要付费访问，取消注释并配置 secrets
+    # ========== 用户登录验证（可选，若不需要可注释此段）==========
     # if "authenticated" not in st.session_state:
     #     st.session_state.authenticated = False
     # if not st.session_state.authenticated:
@@ -1103,8 +1136,6 @@ def main():
             enable_versioning = st.checkbox("自动保存模型版本", value=True)
             enable_3d_plot = st.checkbox("显示3D概率分布图", value=False)
             enable_shap = st.checkbox("启用SHAP解释", value=False)
-
-            # 强制重新训练选项
             force_retrain = st.checkbox("强制重新训练模型（忽略已有模型）", value=False)
 
             epochs = st.slider("最大训练轮数 (Epochs)", 50, 500, 300, step=50)
@@ -1431,7 +1462,6 @@ def main():
         pretrained_model = None
         use_pretrained = False
 
-        # 如果不强制重新训练且存在预训练模型，则直接加载
         if not force_retrain and os.path.exists('models/latest.h5'):
             with st.spinner("加载预训练模型..."):
                 pretrained_model = load_pretrained_model()
@@ -1471,14 +1501,12 @@ def main():
                     st.stop()
                 X_seq = np.array(X_seq)
                 last_sequence = X_seq[-1].reshape(1, X_seq.shape[1], X_seq.shape[2])
-                lstm_prob = pretrained_model.predict(last_sequence, verbose=0)[0]  # sigmoid 输出
-                ball_prob = lstm_prob  # 已经是概率，无需归一化
+                lstm_prob = pretrained_model.predict(last_sequence, verbose=0)[0]
+                ball_prob = lstm_prob
                 st.session_state['scaler'] = scaler
                 st.session_state['look_back'] = look_back
                 st.session_state['lstm_model'] = pretrained_model
-                # 注意：使用预训练模型时，models_dict 和 stacker 为 None，所以预测只用了 LSTM
         else:
-            # 训练新模型
             with st.spinner("训练AI模型..."):
                 if use_enhanced:
                     data_matrix = preprocess_data_enhanced(history_df)
@@ -1535,7 +1563,6 @@ def main():
                         st.session_state['scaler'] = scaler
                         st.session_state['look_back'] = 10
 
-                        # 保存训练好的模型到 models/latest.h5 以便下次使用
                         if lstm_model is not None:
                             os.makedirs('models', exist_ok=True)
                             lstm_model.save('models/latest.h5')
@@ -1702,20 +1729,16 @@ def main():
             mime="text/csv"
         )
 
-    # ==================== 蓝球专报标签页 ====================
     with tab6:
         st.header("🔵 蓝球深度分析")
         st.markdown("本模块独立分析蓝球号码，展示多种预测方法的历史准确率，助您理性参考。")
 
-        # 蓝球走势图
         st.subheader("蓝球走势图")
         st.pyplot(plot_blue_trend(history_df), width='stretch')
 
-        # 蓝球统计
         st.subheader("蓝球频率统计")
         st.dataframe(get_blue_stats(history_df), width='stretch')
 
-        # 蓝球预测方法对比
         st.subheader("蓝球预测方法准确率对比（回测最近100期）")
         methods = {
             '频率法（全历史）': 'frequency',
@@ -1743,7 +1766,6 @@ def main():
                 ax.text(width + 0.5, bar.get_y() + bar.get_height()/2, f'{width:.1f}%', va='center')
             st.pyplot(fig, width='stretch')
 
-        # 当前蓝球推荐
         st.subheader("🎯 当前蓝球推荐")
         st.markdown("**基于频率法的蓝球推荐**（历史出现次数最多）")
         current_blue = predict_blue_frequency(history_df, method='frequency')
