@@ -301,7 +301,7 @@ def backtest_blue_accuracy(history_df, method='frequency', n_periods=100):
             correct += 1
     return correct / n_periods
 
-# ==================== 进度回调 ====================
+# ==================== 进度回调（增强版：显示 accuracy）====================
 class StreamlitProgressCallback(Callback):
     def __init__(self, progress_bar, status_text, epochs):
         super().__init__()
@@ -317,17 +317,19 @@ class StreamlitProgressCallback(Callback):
             f"Epoch {epoch+1}/{self.epochs} - loss: {logs['loss']:.4f} - acc: {acc:.4f} - val_loss: {logs['val_loss']:.4f} - val_acc: {val_acc:.4f}"
         )
 
-# ==================== 多模型训练 ====================
+# ==================== 多模型训练（多标签）====================
 def train_models(data, look_back=10, enhanced=False, use_xgboost=False, use_rf=False, use_lgb=False,
                  lstm_units=128, num_layers=2, dropout=0.2, lstm_weight=1.0,
                  xgb_ensemble_size=1, xgb_params=None, use_stacking=False,
                  learning_rate=0.0005, epochs=300, patience=80, use_l2=False,
                  progress_bar=None, status_text=None):
+    # 检查标签是否为二值0/1
     y_check = data[:10, :33]
     st.write(f"标签检查: min={y_check.min():.4f}, max={y_check.max():.4f}, mean={y_check.mean():.4f}")
     if y_check.min() < 0 or y_check.max() > 1:
         st.error("错误：标签不是0/1！请检查数据预处理。")
         return None, None, None, None, None, None
+    # 如果值不是严格0/1，但接近，可以强制二值化
     if y_check.min() >= 0 and y_check.max() <= 1 and not np.all(np.isin(y_check, [0,1])):
         st.warning("标签有小数，将强制二值化（>0.5为1）")
         data[:, :33] = (data[:, :33] > 0.5).astype(np.float32)
@@ -338,7 +340,7 @@ def train_models(data, look_back=10, enhanced=False, use_xgboost=False, use_rf=F
     X_seq, y = [], []
     for i in range(look_back, len(data_scaled)):
         X_seq.append(data_scaled[i-look_back:i, :])
-        y.append(data[i, :33])
+        y.append(data[i, :33])  # 目标取原始 one‑hot (0/1)
     X_seq = np.array(X_seq)
     y = np.array(y)
 
@@ -470,7 +472,7 @@ def predict_ball_probability(lstm_model, scaler, X_seq, models_dict=None, use_mo
 
     lstm_prob = None
     if lstm_model is not None:
-        lstm_prob = lstm_model.predict(last_sequence, verbose=0)[0]
+        lstm_prob = lstm_model.predict(last_sequence, verbose=0)[0]  # sigmoid 输出
 
     model_probs = []
     if models_dict:
@@ -1729,6 +1731,7 @@ def main():
             mime="text/csv"
         )
 
+    # ==================== 蓝球专报标签页 ====================
     with tab6:
         st.header("🔵 蓝球深度分析")
         st.markdown("本模块独立分析蓝球号码，展示多种预测方法的历史准确率，助您理性参考。")
