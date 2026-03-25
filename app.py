@@ -1030,14 +1030,21 @@ def explain_with_shap(model, X_sample, feature_names):
         return None
 
 # --------------------------
-# 预训练模型加载
+# 预训练模型加载（修复反序列化错误）
 # --------------------------
 @st.cache_resource
 def load_pretrained_model():
     model_path = 'models/latest.h5'
     if os.path.exists(model_path):
+        # 自定义对象映射，解决反序列化问题
+        custom_objects = {
+            'mse': tf.keras.losses.MeanSquaredError(),
+            'accuracy': tf.keras.metrics.BinaryAccuracy(),
+            'binary_crossentropy': tf.keras.losses.BinaryCrossentropy()
+        }
         try:
-            model = tf.keras.models.load_model(model_path)
+            model = tf.keras.models.load_model(model_path, custom_objects=custom_objects)
+            # 获取模型输入特征数
             input_shape = model.input_shape
             if len(input_shape) == 3:
                 features = input_shape[2]
@@ -1051,7 +1058,8 @@ def load_pretrained_model():
         except Exception as e:
             st.sidebar.warning(f"正常加载失败，尝试 compile=False 加载: {e}")
             try:
-                model = tf.keras.models.load_model(model_path, compile=False)
+                model = tf.keras.models.load_model(model_path, compile=False, custom_objects=custom_objects)
+                # 重新编译模型
                 model.compile(optimizer=Adam(learning_rate=0.0005, clipnorm=1.0), loss='binary_crossentropy', metrics=['accuracy'])
                 input_shape = model.input_shape
                 if len(input_shape) == 3:
