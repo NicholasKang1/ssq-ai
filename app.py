@@ -1062,7 +1062,7 @@ def explain_with_shap(model, X_sample, feature_names):
         return None
 
 # --------------------------
-# 预训练模型加载（修复反序列化错误）
+# 预训练模型加载（修复反序列化错误，并设置默认值）
 # --------------------------
 @st.cache_resource
 def load_pretrained_model():
@@ -1086,6 +1086,7 @@ def load_pretrained_model():
             else:
                 st.sidebar.warning("模型输入形状异常，将使用默认特征数33")
                 st.session_state['model_input_features'] = 33
+                st.session_state['model_input_timesteps'] = 10
             return model
         except Exception as e:
             st.sidebar.warning(f"正常加载失败，尝试 compile=False 加载: {e}")
@@ -1101,12 +1102,17 @@ def load_pretrained_model():
                     st.sidebar.success(f"✅ 已用兼容模式加载模型 (输入特征数: {features})")
                 else:
                     st.session_state['model_input_features'] = 33
+                    st.session_state['model_input_timesteps'] = 10
                 return model
             except Exception as e2:
                 st.sidebar.error(f"模型加载失败: {e2}")
+                st.session_state['model_input_features'] = 33  # 即使失败也设置默认值
+                st.session_state['model_input_timesteps'] = 10
                 return None
     else:
         st.sidebar.info("ℹ️ 暂无预训练模型")
+        st.session_state['model_input_features'] = 33  # 设置默认值
+        st.session_state['model_input_timesteps'] = 10
         return None
     # --------------------------
 # Streamlit 页面布局
