@@ -265,45 +265,6 @@ def train_blue_model(df):
     prob = counts / len(blue_series)
     return prob
 
-# ==================== 蓝球预测方法（用于回测）====================
-def predict_blue_frequency(history_df, method='frequency'):
-    """基于历史频率返回最可能的蓝球"""
-    counts = history_df['blue'].value_counts()
-    if method == 'frequency':
-        return counts.idxmax()
-    elif method == 'hot':
-        # 最近50期最热
-        recent = history_df.tail(50)['blue'].value_counts()
-        return recent.idxmax() if not recent.empty else 1
-    elif method == 'cold':
-        # 最近50期最冷（出现最少）
-        recent = history_df.tail(50)['blue'].value_counts()
-        all_nums = set(range(1,17))
-        appeared = set(recent.index)
-        cold = list(all_nums - appeared)
-        if cold:
-            return random.choice(cold)
-        else:
-            return 1
-    else:
-        return random.randint(1,16)
-
-def backtest_blue_accuracy(history_df, method='frequency', n_periods=100):
-    """回测蓝球预测准确率"""
-    if len(history_df) < n_periods + 1:
-        n_periods = len(history_df) - 1
-    if n_periods <= 0:
-        return 0.0
-    test_df = history_df.tail(n_periods + 1).reset_index(drop=True)
-    correct = 0
-    for i in range(1, len(test_df)):
-        train = test_df.iloc[:i]  # 使用之前的数据训练
-        pred = predict_blue_frequency(train, method)
-        actual = test_df.iloc[i]['blue']
-        if pred == actual:
-            correct += 1
-    return correct / n_periods
-
 # ==================== 进度回调（增强版：显示 accuracy）====================
 class StreamlitProgressCallback(Callback):
     def __init__(self, progress_bar, status_text, epochs):
@@ -1066,6 +1027,30 @@ def main():
         layout="wide",
         initial_sidebar_state="expanded"
     )
+
+    # ========== 用户登录验证（可选，若不需要可删除此段）==========
+    # 如需要付费访问，取消注释并配置 secrets
+    # if "authenticated" not in st.session_state:
+    #     st.session_state.authenticated = False
+    # if not st.session_state.authenticated:
+    #     st.title("🔐 用户登录")
+    #     try:
+    #         users = st.secrets["users"]
+    #     except:
+    #         st.error("系统配置错误，请联系管理员。")
+    #         st.stop()
+    #     username = st.text_input("用户名")
+    #     password = st.text_input("密码", type="password")
+    #     if st.button("登录"):
+    #         if username in users and users[username] == password:
+    #             st.session_state.authenticated = True
+    #             st.success("登录成功！")
+    #             st.rerun()
+    #         else:
+    #             st.error("用户名或密码错误")
+    #     st.stop()
+    # ========== 登录验证结束 ==========
+
     st.title("🎯 AI双色球量化分析系统 (终极增强版)")
     st.markdown("---")
 
@@ -1118,6 +1103,10 @@ def main():
             enable_versioning = st.checkbox("自动保存模型版本", value=True)
             enable_3d_plot = st.checkbox("显示3D概率分布图", value=False)
             enable_shap = st.checkbox("启用SHAP解释", value=False)
+
+            # 强制重新训练选项
+            force_retrain = st.checkbox("强制重新训练模型（忽略已有模型）", value=False)
+
             epochs = st.slider("最大训练轮数 (Epochs)", 50, 500, 300, step=50)
             patience = st.slider("早停耐心值 (Patience)", 20, 120, 80, step=10)
             xgb_ensemble_size = st.number_input("XGBoost集成数量", min_value=1, max_value=10, value=1)
@@ -1438,11 +1427,22 @@ def main():
         progress_bar = st.progress(0) if enable_progress else None
         status_text = st.empty() if enable_progress else None
 
+        # 判断是否使用预训练模型
         pretrained_model = None
-        if not use_enhanced:
-            pretrained_model = load_pretrained_model()
+        use_pretrained = False
 
-        if pretrained_model is not None:
+        # 如果不强制重新训练且存在预训练模型，则直接加载
+        if not force_retrain and os.path.exists('models/latest.h5'):
+            with st.spinner("加载预训练模型..."):
+                pretrained_model = load_pretrained_model()
+                if pretrained_model is not None:
+                    use_pretrained = True
+                    st.success("已加载预训练模型，可直接预测。")
+                else:
+                    st.warning("预训练模型加载失败，将重新训练。")
+                    use_pretrained = False
+
+        if use_pretrained:
             with st.spinner("使用预训练模型预测概率..."):
                 model_features = st.session_state.get('model_input_features', 33)
                 model_timesteps = st.session_state.get('model_input_timesteps', 10)
@@ -1476,7 +1476,9 @@ def main():
                 st.session_state['scaler'] = scaler
                 st.session_state['look_back'] = look_back
                 st.session_state['lstm_model'] = pretrained_model
+                # 注意：使用预训练模型时，models_dict 和 stacker 为 None，所以预测只用了 LSTM
         else:
+            # 训练新模型
             with st.spinner("训练AI模型..."):
                 if use_enhanced:
                     data_matrix = preprocess_data_enhanced(history_df)
@@ -1532,6 +1534,12 @@ def main():
                         st.session_state['models_dict'] = models_dict
                         st.session_state['scaler'] = scaler
                         st.session_state['look_back'] = 10
+
+                        # 保存训练好的模型到 models/latest.h5 以便下次使用
+                        if lstm_model is not None:
+                            os.makedirs('models', exist_ok=True)
+                            lstm_model.save('models/latest.h5')
+                            st.info("新模型已保存为 models/latest.h5，下次可直接加载。")
 
                         if enable_versioning:
                             if lstm_model is not None:
@@ -1694,7 +1702,7 @@ def main():
             mime="text/csv"
         )
 
-    # ==================== 新增：蓝球专报标签页 ====================
+    # ==================== 蓝球专报标签页 ====================
     with tab6:
         st.header("🔵 蓝球深度分析")
         st.markdown("本模块独立分析蓝球号码，展示多种预测方法的历史准确率，助您理性参考。")
@@ -1722,7 +1730,6 @@ def main():
         acc_df = pd.DataFrame(accuracy_data)
         acc_df['准确率'] = acc_df['准确率'].round(2)
 
-        # 显示准确率表格和条形图
         col_acc1, col_acc2 = st.columns([1, 2])
         with col_acc1:
             st.dataframe(acc_df, width='stretch')
@@ -1731,7 +1738,6 @@ def main():
             bars = ax.barh(acc_df['方法'], acc_df['准确率'], color=['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728'])
             ax.set_xlabel('准确率 (%)')
             ax.set_title('蓝球预测方法历史回测准确率')
-            # 在柱状图上显示数值
             for bar in bars:
                 width = bar.get_width()
                 ax.text(width + 0.5, bar.get_y() + bar.get_height()/2, f'{width:.1f}%', va='center')
@@ -1744,7 +1750,6 @@ def main():
         st.success(f"⭐ 推荐蓝球：**{current_blue:02d}**")
         st.caption("注：蓝球完全随机，任何预测方法均无法保证准确性，请理性参考。")
 
-        # 补充说明
         st.info("""
         **说明**：
         - 准确率基于历史回测，使用前一期及以前的数据预测下一期，滚动计算。
